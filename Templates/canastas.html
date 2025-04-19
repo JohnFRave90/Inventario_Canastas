@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registrar Canasta</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- Agregar Bootstrap desde el CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 20px;
+        }
+        .sidebar {
+            position: fixed;
+            top: 60px; /* Ajuste para quedar debajo del header */
+            bottom: 0;
+            left: 0;
+            width: 250px;
+            background-color: #f8f9fa;
+            padding-top: 20px;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s;
+        }
+        .content {
+            margin-left: 270px;
+            padding: 20px;
+            margin-top: 60px; /* Ajuste para que el contenido no quede tapado por el header */
+            transition: margin-left 0.3s;
+        }
+        .header {
+            background-color: #e84a1d;
+            padding: 10px;
+            color: white;
+            text-align: left;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 1000; /* Asegura que el header esté por encima del sidebar */
+        }
+        .header img {
+            width: 50px;
+            margin-right: 20px;
+        }
+        .header h1 {
+            display: inline;
+            font-size: 24px;
+            margin-left: 20px;
+        }
+        .footer {
+            background-color: #f8f9fa;
+            padding: 10px;
+            text-align: center;
+            border-top: 1px solid #ddd;
+        }
+        .button {
+            background-color: #ca3317;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            cursor: pointer;
+        }
+        .button:hover {
+            background-color: #e84a1d;
+        }
+        .card {
+            margin-bottom: 20px;
+        }
+        /* Estilo para el botón de toggle */
+        .toggle-btn {
+            background-color: #e84a1d;
+            color: white;
+            border: none;
+            padding: 10px;
+            cursor: pointer;
+        }
+        .toggle-btn:hover {
+            background-color: #ca3317;
+        }
+        /* Ocultar la sidebar */
+        .sidebar-hidden {
+            left: -250px;
+        }
+        .content-expanded {
+            margin-left: 0;
+        }
+
+        /* Estilo para la tabla de canastas registradas */
+        table {
+            width: 100%;
+            margin-top: 20px;
+            border-collapse: collapse;
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        tr:hover {
+            background-color: #f1f1f1;
+        }
+
+    </style>
+</head>
+<body onload="setFocusToCodigoBarras()">  <!-- Llama la función cuando la página se cargue -->
+
+    <!-- Header -->
+    <div class="header d-flex align-items-center">
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo"> <!-- Cargar logo desde la carpeta static -->
+        <a href="{{ url_for('index') }}" class="btn btn-light">Ir a la Página Principal</a>
+        <button class="toggle-btn" id="toggleButton">☰</button> <!-- Botón para ocultar/mostrar el sidebar -->
+        <h1>Inventario de Canastas INCOLPAN</h1> <!-- Título agregado al lado del logo -->
+    </div>
+
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+        <h5 class="text-center">Registros e Informes</h5>
+        <ul class="list-unstyled">
+            <li><a href="{{ url_for('canastas') }}">Registrar Canasta</a></li>
+            <li><a href="{{ url_for('vendedores') }}">Registrar Vendedor</a></li>
+            <li><a href="{{ url_for('movimientos') }}">Registrar Movimiento</a></li>
+            <li><a href="{{ url_for('informe_canastas') }}">Informe de Canastas</a></li>
+            <li><a href="{{ url_for('informe_movimientos') }}">Informe de Movimientos</a></li>
+            <li><a href="{{ url_for('informe_vendedores') }}">Informe de Vendedores</a></li>
+            <li><a href="{{ url_for('informe_buscar_canasta') }}">Buscar Canasta</a></li>
+            <li><a href="{{ url_for('informe_canastas_prestadas_por_vendedor') }}">Canastas prestadas</a></li>
+            <li><a href="{{ url_for('informe_canastas_por_vendedor') }}">Canastas Prestadas por Vendedor</a></li>
+        </ul>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="content" id="content">
+        <div class="container">
+            <h1>Registrar Canasta</h1>
+
+            <!-- Formulario para registrar la canasta -->
+            <form method="POST">
+                <label for="codigo_barras">Código de Barras:</label>
+                <input type="text" id="codigo_barras" name="codigo_barras" required value="{{ request.form['codigo_barras'] if request.method == 'POST' else '' }}"><br><br>
+
+                <!-- Lista desplegable para el tamaño -->
+                <label for="tamano">Tamaño:</label>
+                <select id="tamano" name="tamano">
+                    <option value="Pequeña" {% if tamano == 'Pequeña' %} selected {% endif %}>Pequeña</option>
+                    <option value="Mediana" {% if tamano == 'Mediana' %} selected {% endif %}>Mediana</option>
+                    <option value="Estandar" {% if tamano == 'Estandar' %} selected {% endif %}>Estandar</option>
+                    <option value="Grande" {% if tamano == 'Grande' %} selected {% endif %}>Grande</option>
+                </select><br><br>
+
+                <!-- Lista desplegable para el color -->
+                <label for="color">Color:</label>
+                <select id="color" name="color">
+                    <option value="Amarillo" {% if color == 'Amarillo' %} selected {% endif %}>Amarillo</option>
+                    <option value="Azul" {% if color == 'Azul' %} selected {% endif %}>Azul</option>
+                    <option value="Blanco" {% if color == 'Blanco' %} selected {% endif %}>Blanco</option>
+                    <option value="Gris Claro" {% if color == 'Gris Claro' %} selected {% endif %}>Gris Claro</option>
+                    <option value="Gris Oscuro" {% if color == 'Gris Oscuro' %} selected {% endif %}>Gris Oscuro</option>
+                    <option value="Morado" {% if color == 'Morado' %} selected {% endif %}>Morado</option>
+                    <option value="Negro" {% if color == 'Negro' %} selected {% endif %}>Negro</option>
+                    <option value="Naranja" {% if color == 'Naranja' %} selected {% endif %}>Naranja</option>
+                    <option value="Rojo" {% if color == 'Rojo' %} selected {% endif %}>Rojo</option>
+                    <option value="Verde" {% if color == 'Verde' %} selected {% endif %}>Verde</option>
+                    <option value="Vinotinto" {% if color == 'Vinotinto' %} selected {% endif %}>Vinotinto</option>
+                </select><br><br>
+
+                <!-- Lista desplegable para el estado -->
+                <label for="estado">Estado:</label>
+                <select id="estado" name="estado">
+                    <option value="Nuevo" {% if estado == 'Nuevo' %} selected {% endif %}>Nuevo</option>
+                    <option value="Usado" {% if estado == 'Usado' %} selected {% endif %}>Usado</option>
+                </select><br><br>
+
+                <!-- Lista desplegable para la actualidad -->
+                <label for="actualidad">Actualidad:</label>
+                <select id="actualidad" name="actualidad">
+                    <option value="Prestada" {% if actualidad == 'Prestada' %} selected {% endif %}>Prestada</option>
+                    <option value="Disponible" {% if actualidad == 'Disponible' %} selected {% endif %}>Disponible</option>
+                    <option value="Fuera de servicio" {% if actualidad == 'Fuera de servicio' %} selected {% endif %}>Fuera de servicio</option>
+                </select><br><br>
+
+                <button type="submit">Registrar Canasta</button>
+            </form>
+
+            <!-- Botón para exportar las canastas a CSV -->
+            <br><br>
+            <form action="{{ url_for('exportar_canastas_csv') }}" method="GET">
+                <button type="submit">Exportar Canastas a CSV</button>
+            </form>
+
+            <!-- Mensajes de éxito o error -->
+            {% with messages = get_flashed_messages() %}
+                {% if messages %}
+                    <ul>
+                        {% for message in messages %}
+                            <li>{{ message }}</li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+            {% endwith %}
+
+            <h2>Canastas Registradas</h2>
+            <table border="1">
+                <tr>
+                    <th>Código de Barras</th>
+                    <th>Tamaño</th>
+                    <th>Color</th>
+                    <th>Estado</th>
+                    <th>Fecha de Registro</th>
+                    <th>Actualidad</th>
+                </tr>
+                {% for canasta in canastas %}
+                <tr>
+                    <td>{{ canasta[0] }}</td>
+                    <td>{{ canasta[1] }}</td>
+                    <td>{{ canasta[2] }}</td>
+                    <td>{{ canasta[3] }}</td>
+                    <td>{{ canasta[4] }}</td>
+                    <td>{{ canasta[5] }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+
+        </div>
+    </div>
+
+    <!-- Agregar Bootstrap JS y Popper.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.min.js"></script>
+
+    <script>
+        // JavaScript para alternar el sidebar
+        const toggleButton = document.getElementById('toggleButton');
+        const sidebar = document.getElementById('sidebar');
+        const content = document.getElementById('content');
+
+        toggleButton.addEventListener('click', function() {
+            sidebar.classList.toggle('sidebar-hidden');
+            content.classList.toggle('content-expanded');
+        });
+
+        // Función para mantener el foco en el campo de código de barras
+        function setFocusToCodigoBarras() {
+            document.getElementById("codigo_barras").focus();
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+inventario_canastas/
+│
+├── app.py                # Archivo principal de Flask (reemplaza main.py)
+├── templates/            # Carpeta para archivos HTML
+│   ├── index.html        # Página de inicio
+│   ├── canastas.html     # Página para manejar canastas
+│   ├── movimientos.html  # Página para manejar movimientos
+│   └── vendedores.html   # Página para manejar vendedores
+├── static/               # Carpeta para archivos estáticos (CSS, imágenes, JS)
+│   ├── logo.ico          # Logo de la aplicación
+│   ├── style.css         # Estilos CSS
+└── db/                   # Carpeta para la base de datos SQLite
+    └── inventario.db     # Base de datos SQLite
