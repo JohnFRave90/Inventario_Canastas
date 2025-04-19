@@ -7,7 +7,7 @@ import sqlite3
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-import io
+import os
 import base64
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
@@ -15,9 +15,14 @@ from functools import wraps
 app = Flask(__name__)
 app.secret_key = 'secret_key'  # Para manejar las alertas (flashes)
 
+# Obtener la ruta de la base de datos desde una variable de entorno
+db_path = os.getenv("DATABASE_URL", "db/inventario.db")
+
+
 # Función para obtener la conexión con la base de datos
 def obtener_conexion():
-    return sqlite3.connect('db/inventario.db')
+    conn = sqlite3.connect(db_path)
+    return conn
 
 # Decorador para restringir acceso a administradores
 def admin_required(f):
