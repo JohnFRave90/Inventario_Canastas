@@ -16,8 +16,8 @@ app = Flask(__name__)
 app.secret_key = 'secret_key'  # Para manejar las alertas (flashes)
 
 # Obtener la ruta de la base de datos desde una variable de entorno
-db_path = os.getenv("DATABASE_URL", "db/inventario.db")
-
+#db_path = os.getenv("DATABASE_URL", "'/home/JohnRave/Inventario_Canastas/db/Inventario.db'")
+db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'db', 'inventario.db')
 
 # Función para obtener la conexión con la base de datos
 def obtener_conexion():
@@ -893,23 +893,31 @@ def informe_canastas_por_vendedor():
 
         vendedor_codigo = vendedor[0]
 
-        # Obtener las canastas prestadas por el vendedor
+        # Obtener las canastas prestadas activas (no devueltas)
         cursor.execute('''
             SELECT c.tamano, c.color, COUNT(*) 
             FROM canastas c
             JOIN movimientos m ON c.codigo_barras = m.codigo_barras
-            WHERE m.vendedor_codigo = ? AND m.tipo = 'Sale'
+            WHERE m.vendedor_codigo = ? AND m.tipo = 'Sale' AND c.actualidad = 'Prestada'
+            AND NOT EXISTS (
+                SELECT 1 FROM movimientos m2
+                WHERE m2.codigo_barras = m.codigo_barras AND m2.tipo = 'Entra'
+            )
             GROUP BY c.tamano, c.color
         ''', (vendedor_codigo,))
 
         resumen = cursor.fetchall()
 
-        # Obtener los detalles de las canastas prestadas por el vendedor
+        # Obtener los detalles de las canastas prestadas y no devueltas
         cursor.execute('''
             SELECT c.codigo_barras, c.tamano, c.color, m.fecha 
             FROM canastas c
             JOIN movimientos m ON c.codigo_barras = m.codigo_barras
-            WHERE m.vendedor_codigo = ? AND m.tipo = 'Sale'
+            WHERE m.vendedor_codigo = ? AND m.tipo = 'Sale' AND c.actualidad = 'Prestada'
+            AND NOT EXISTS (
+                SELECT 1 FROM movimientos m2
+                WHERE m2.codigo_barras = m.codigo_barras AND m2.tipo = 'Entra'
+            )
             ORDER BY m.fecha DESC
         ''', (vendedor_codigo,))
 
@@ -933,14 +941,15 @@ def informe_canastas_prestadas_por_vendedor():
         conn = obtener_conexion()
         cursor = conn.cursor()
 
-        # Consulta para contar cuántas canastas prestadas tiene cada vendedor
+        # Consulta para contar cuántas canastas tiene prestadas cada vendedor
         cursor.execute('''
-            SELECT v.nombre, COUNT(*) AS canastas_prestadas
+            SELECT v.nombre, 
+                   SUM(CASE WHEN m.tipo = 'Sale' THEN 1 ELSE 0 END) - 
+                   SUM(CASE WHEN m.tipo = 'Entra' THEN 1 ELSE 0 END) AS canastas_prestadas_activas
             FROM movimientos m
             JOIN vendedores v ON m.vendedor_codigo = v.codigo
-            WHERE m.tipo = 'Sale'
             GROUP BY v.nombre
-            ORDER BY canastas_prestadas DESC
+            ORDER BY canastas_prestadas_activas DESC
         ''')
 
         # Recuperar los resultados
