@@ -405,25 +405,26 @@ def canastas_perdidas():
 
 @app.route('/exportar_pdf_canastas_perdidas')
 @login_required
-@admin_required
 def exportar_pdf_canastas_perdidas():
-    from flask import flash, redirect, url_for
-
     conn = obtener_conexion()
     cursor = conn.cursor()
 
     cursor.execute("""
         SELECT 
             c.codigo_barras,
-            MAX(m.fecha) AS fecha_prestamo,
+            m.fecha AS fecha_prestamo,
             v.nombre AS nombre_vendedor
         FROM canastas c
-        JOIN movimientos m ON c.codigo_barras = m.codigo_barras
-        JOIN vendedores v ON m.vendedor_codigo = v.codigo
+        JOIN (
+            SELECT codigo_barras, MAX(fecha) AS fecha
+            FROM movimientos
+            WHERE tipo = 'Sale'
+            GROUP BY codigo_barras
+        ) m ON c.codigo_barras = m.codigo_barras
+        JOIN movimientos mov ON mov.codigo_barras = c.codigo_barras AND mov.fecha = m.fecha
+        JOIN vendedores v ON mov.vendedor_codigo = v.codigo
         WHERE c.actualidad = 'Prestada'
-          AND m.tipo = 'Sale'
-        GROUP BY c.codigo_barras
-        HAVING fecha_prestamo <= DATE('now', '-7 day')
+          AND m.fecha <= datetime('now', '-7 days')
     """)
     rows = cursor.fetchall()
     conn.close()
@@ -435,9 +436,9 @@ def exportar_pdf_canastas_perdidas():
     data = []
     for codigo, fecha, vendedor in rows:
         fecha_obj = datetime.fromisoformat(fecha)
-        fecha_formateada = fecha_obj.strftime("%Y-%m-%d %H:%M")
+        fecha_fmt = fecha_obj.strftime("%Y-%m-%d %H:%M")
         dias = (datetime.now() - fecha_obj).days
-        data.append((codigo, fecha_formateada, vendedor, dias))
+        data.append((codigo, fecha_fmt, vendedor, dias))
 
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
