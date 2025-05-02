@@ -3,6 +3,7 @@ import pandas as pd
 from flask import send_file, Response
 import csv
 import io
+from io import BytesIO
 import sqlite3
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
@@ -11,6 +12,9 @@ import os
 import base64
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+import re
 
 app = Flask(__name__)
 app.secret_key = 'secret_key'  # Para manejar las alertas (flashes)
@@ -116,11 +120,21 @@ def index():
         flash(f'Error al obtener los datos: {e}')
         return redirect(url_for('index'))
 
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash('Por favor, inicia sesión para continuar.')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # ===================== Vendedores =====================
 
 # Ruta para agregar un vendedor
 @app.route('/vendedores', methods=['GET', 'POST'])
+@login_required
+@admin_required
 def vendedores():
     if request.method == 'POST':
         codigo = request.form['codigo']
@@ -157,6 +171,7 @@ def vendedores():
 
 # Ruta para eliminar un vendedor (solo administradores)
 @app.route('/eliminar_vendedor', methods=['POST'])
+@login_required
 @admin_required
 def eliminar_vendedor():
     codigo = request.form['codigo']
@@ -180,6 +195,7 @@ def eliminar_vendedor():
 
 # Ruta para modificar un vendedor (solo administradores)
 @app.route('/modificar_vendedor', methods=['POST'])
+@login_required
 @admin_required
 def modificar_vendedor():
     codigo = request.form['codigo']
@@ -203,6 +219,7 @@ def modificar_vendedor():
     return redirect(url_for('vendedores'))
 
 @app.route('/exportar_vendedores_csv', methods=['GET'])
+@login_required
 def exportar_vendedores_csv():
     try:
         # Conexión a la base de datos
@@ -239,7 +256,12 @@ def exportar_vendedores_csv():
 # ===================== Canastas =====================
 # Ruta para registrar canastas
 @app.route('/canastas', methods=['GET', 'POST'])
+@login_required
+@admin_required
 def canastas():
+    tamano = color = estado = actualidad = ''
+    codigo_barras = ''
+
     if request.method == 'POST':
         codigo_barras = request.form['codigo_barras']
         tamano = request.form['tamano']
@@ -250,34 +272,40 @@ def canastas():
         
         if not (codigo_barras and tamano and color and estado and actualidad):
             flash('Todos los campos son obligatorios')
-            return redirect(url_for('canastas'))
+        else:
+            try:
+                conn = obtener_conexion()
+                cursor = conn.cursor()
+                cursor.execute(''' 
+                    INSERT INTO canastas (codigo_barras, tamano, color, estado, fecha_registro, actualidad)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (codigo_barras, tamano, color, estado, fecha_registro, actualidad))
+                conn.commit()
+                conn.close()
+                flash('Canasta registrada con éxito')
+                codigo_barras = ''  # Limpiar el campo después del registro
+            except sqlite3.Error as e:
+                flash(f'Error al registrar la canasta: {e}')
 
-        try:
-            conn = obtener_conexion()
-            cursor = conn.cursor()
-            cursor.execute(''' 
-                INSERT INTO canastas (codigo_barras, tamano, color, estado, fecha_registro, actualidad)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (codigo_barras, tamano, color, estado, fecha_registro, actualidad))
-            conn.commit()
-            conn.close()
-
-            flash('Canasta registrada con éxito')
-        except sqlite3.Error as e:
-            flash(f'Error al registrar la canasta: {e}')
-        
-        return redirect(url_for('canastas'))
-
+    # Obtener todas las canastas
     conn = obtener_conexion()
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM canastas')
     canastas = cursor.fetchall()
     conn.close()
     
-    return render_template('canastas.html', canastas=canastas)
+    return render_template('canastas.html',
+                           canastas=canastas,
+                           codigo_barras=codigo_barras,
+                           tamano=tamano,
+                           color=color,
+                           estado=estado,
+                           actualidad=actualidad)
 
 #Ruta para exportar a excel las canastas
 @app.route('/exportar_canastas', methods=['GET'])
+@login_required
+@admin_required
 def exportar_canastas():
     try:
         # Conexión a la base de datos
@@ -310,6 +338,8 @@ def exportar_canastas():
         return redirect(url_for('index'))
 
 @app.route('/exportar_canastas_csv', methods=['GET'])
+@login_required
+@admin_required
 def exportar_canastas_csv():
     try:
         # Conexión a la base de datos
@@ -343,10 +373,103 @@ def exportar_canastas_csv():
         flash(f'Error al exportar las canastas a CSV: {e}')
         return redirect(url_for('index'))
 
+@app.route('/canastas_perdidas')
+@login_required
+def canastas_perdidas():
+    conn = obtener_conexion()
+    cursor = conn.cursor()
+    query = """
+    SELECT 
+        c.codigo_barras,
+        MAX(m.fecha) AS fecha_prestamo,
+        v.nombre AS nombre_vendedor
+    FROM canastas c
+    JOIN movimientos m ON c.codigo_barras = m.codigo_barras
+    JOIN vendedores v ON m.vendedor_codigo = v.codigo
+    WHERE c.actualidad = 'Prestada'
+      AND m.tipo = 'Sale'
+    GROUP BY c.codigo_barras
+    HAVING fecha_prestamo <= DATE('now', '-7 day')
+    """
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    df['fecha_prestamo'] = pd.to_datetime(df['fecha_prestamo'])
+    df['dias_prestada'] = (datetime.now() - df['fecha_prestamo']).dt.days
+    return render_template('canastas_perdidas.html', canastas=df.to_dict(orient='records'))
+
+@app.route('/exportar_pdf_canastas_perdidas')
+@login_required
+@admin_required
+def exportar_pdf_canastas_perdidas():
+    from flask import flash, redirect, url_for
+
+    conn = obtener_conexion()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT 
+            c.codigo_barras,
+            MAX(m.fecha) AS fecha_prestamo,
+            v.nombre AS nombre_vendedor
+        FROM canastas c
+        JOIN movimientos m ON c.codigo_barras = m.codigo_barras
+        JOIN vendedores v ON m.vendedor_codigo = v.codigo
+        WHERE c.actualidad = 'Prestada'
+          AND m.tipo = 'Sale'
+        GROUP BY c.codigo_barras
+        HAVING fecha_prestamo <= DATE('now', '-7 day')
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        flash("No hay canastas perdidas para exportar.", "info")
+        return redirect(url_for('canastas_perdidas'))
+
+    data = []
+    for codigo, fecha, vendedor in rows:
+        fecha_obj = datetime.fromisoformat(fecha)
+        fecha_formateada = fecha_obj.strftime("%Y-%m-%d %H:%M")
+        dias = (datetime.now() - fecha_obj).days
+        data.append((codigo, fecha_formateada, vendedor, dias))
+
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(160, height - 50, "Canastas Prestadas +7 días")
+
+    c.setFont("Helvetica", 10)
+    headers = ["Código", "Fecha Préstamo", "Vendedor", "Días Prestada"]
+    x = 50
+    y = height - 80
+
+    for i, header in enumerate(headers):
+        c.drawString(x + i * 120, y, header)
+
+    y -= 20
+    for row in data:
+        for i, item in enumerate(row):
+            c.drawString(x + i * 120, y, str(item))
+        y -= 18
+        if y < 50:
+            c.showPage()
+            y = height - 50
+
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawRightString(width - 40, 20, f"Generado el {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+    c.save()
+    buffer.seek(0)
+
+    return send_file(buffer, as_attachment=True, download_name="canastas_perdidas.pdf", mimetype="application/pdf")
+
 # ===================== Movimientos =====================
 
 # Ruta para registrar movimientos
 @app.route('/movimientos', methods=['GET', 'POST'])
+@login_required
 def movimientos():
     # Inicializar contador de registros exitosos si no está en la sesión
     if 'contador_registros' not in session:
@@ -482,6 +605,7 @@ def movimientos():
 
 # Ruta para ver los movimientos registrados
 @app.route('/ver_movimientos')
+@login_required
 def ver_movimientos():
     conn = obtener_conexion()
     cursor = conn.cursor()
@@ -499,6 +623,7 @@ def ver_movimientos():
 
 # Función para generar el informe de canastas
 @app.route('/generar_informe_canastas')
+@login_required
 def generar_informe_canastas():
     conn = obtener_conexion()
     cursor = conn.cursor()
@@ -526,6 +651,7 @@ def generar_informe_canastas():
 
 # Función para generar el informe de movimientos
 @app.route('/generar_informe_movimientos')
+@login_required
 def generar_informe_movimientos():
     conn = obtener_conexion()
     cursor = conn.cursor()
@@ -545,6 +671,7 @@ def generar_informe_movimientos():
 
 # Ruta para generar el informe de canastas
 @app.route('/informe_canastas', methods=['GET'])
+@login_required
 def informe_canastas():
     try:
         # Conexión a la base de datos
@@ -621,6 +748,7 @@ def exportar_a_csv_canastas():
 
 # Ruta para generar el informe de movimientos
 @app.route('/informe_movimientos', methods=['GET'])
+@login_required
 def informe_movimientos():
     try:
         # Obtener las fechas de inicio y fin del rango desde la URL
@@ -696,6 +824,7 @@ def exportar_a_csv_movimientos(movimientos, fecha_inicio, fecha_fin):
 
 # Ruta para generar el informe de movimientos
 @app.route('/informe_vendedores', methods=['GET'])
+@login_required
 def informe_vendedores():
     try:
         # Obtener la fecha de la solicitud
@@ -766,6 +895,7 @@ def exportar_a_csv(vendedores, fecha):
    
 # Ruta para generar el informe de busqueda de canasta
 @app.route('/informe_buscar_canasta', methods=['GET', 'POST'])
+@login_required
 def informe_buscar_canasta():
     if request.method == 'POST':
         # Obtener el código de barras de la canasta ingresado por el usuario
@@ -812,6 +942,7 @@ def informe_buscar_canasta():
     return render_template('informe_buscar_canasta.html', canasta=None, movimientos=[])
 
 @app.route('/exportar_csv_canasta', methods=['GET'])
+@login_required
 def exportar_csv_canasta():
     # Recuperar el código de barras de la URL
     codigo_barras = request.args.get('codigo_barras')
@@ -871,6 +1002,7 @@ def exportar_csv_canasta():
 
 # Ruta para generar el informe de cuantas y cuales canastas tiene prestadas un vendedor
 @app.route('/informe_canastas_por_vendedor', methods=['GET', 'POST'])
+@login_required
 def informe_canastas_por_vendedor():
     # Obtener la lista de vendedores para mostrarla en el formulario
     conn = obtener_conexion()
@@ -935,6 +1067,7 @@ def informe_canastas_por_vendedor():
 
 # Ruta para generar el informe de cuantas canastas tiene prestadas por vendedor
 @app.route('/informe_canastas_prestadas_por_vendedor', methods=['GET'])
+@login_required
 def informe_canastas_prestadas_por_vendedor():
     try:
         # Conexión a la base de datos
@@ -970,6 +1103,7 @@ def informe_canastas_prestadas_por_vendedor():
 
 # Función para exportar el informe de canastas prestadas a CSV
 @app.route('/exportar_csv_canastas_prestadas', methods=['GET'])
+@login_required
 def exportar_a_csv_canastas_prestadas(canastas_prestadas):
     import csv
     import io
@@ -996,6 +1130,7 @@ def exportar_a_csv_canastas_prestadas(canastas_prestadas):
 
 # Función borrar todos los movimientos y actualizar canastas a disponibles
 @app.route('/borrar_movimientos', methods=['POST'])
+@login_required
 @admin_required
 def borrar_movimientos():
     try:
@@ -1020,6 +1155,7 @@ def borrar_movimientos():
 
 # Función borrar todas las canastas
 @app.route('/borrar_canastas', methods=['POST'])
+@login_required
 @admin_required
 def borrar_canastas():
     try:
@@ -1044,15 +1180,20 @@ def borrar_canastas():
 from werkzeug.security import generate_password_hash, check_password_hash
 
 @app.route('/registrar_usuario', methods=['GET', 'POST'])
+@login_required
 @admin_required
 def registrar_usuario():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
         role = request.form['role']
-        
+
         if not username or not password:
             flash('Todos los campos son obligatorios')
+            return redirect(url_for('registrar_usuario'))
+
+        if not es_contrasena_segura(password):
+            flash('La contraseña no es segura. Debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas, números y símbolos.')
             return redirect(url_for('registrar_usuario'))
 
         try:
@@ -1063,9 +1204,7 @@ def registrar_usuario():
                 flash('El nombre de usuario ya existe')
                 return redirect(url_for('registrar_usuario'))
 
-            # Hashear la contraseña antes de guardarla
             hashed_password = generate_password_hash(password)
-
             cursor.execute('''
                 INSERT INTO usuarios (username, password, role)
                 VALUES (?, ?, ?)
@@ -1075,9 +1214,9 @@ def registrar_usuario():
             flash('Usuario registrado con éxito')
         except sqlite3.Error as e:
             flash(f'Error al registrar el usuario: {e}')
-        
+
         return redirect(url_for('index'))
-    
+
     return render_template('registrar_usuario.html')
 
 # Ruta para iniciar sesión
@@ -1153,6 +1292,92 @@ def actualizar_contraseñas_route():
         flash(f'Error al actualizar las contraseñas: {e}')
     
     return redirect(url_for('index'))
+
+
+# RUTA: Cambiar tu propia contraseña
+@app.route('/cambiar_contrasena', methods=['GET', 'POST'])
+@login_required
+def cambiar_contrasena():
+    if request.method == 'POST':
+        actual = request.form['actual']
+        nueva = request.form['nueva']
+        confirmar = request.form['confirmar']
+
+        if nueva != confirmar:
+            flash('La nueva contraseña y la confirmación no coinciden.')
+            return redirect(url_for('cambiar_contrasena'))
+
+        if not es_contrasena_segura(nueva):
+            flash('La nueva contraseña no es segura. Debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas, números y símbolos.')
+            return redirect(url_for('cambiar_contrasena'))
+
+        conn = obtener_conexion()
+        cursor = conn.cursor()
+        cursor.execute('SELECT password FROM usuarios WHERE id = ?', (session['user_id'],))
+        actual_hash = cursor.fetchone()[0]
+
+        if not check_password_hash(actual_hash, actual):
+            flash('La contraseña actual no es correcta.')
+            return redirect(url_for('cambiar_contrasena'))
+
+        nueva_hash = generate_password_hash(nueva)
+        cursor.execute('UPDATE usuarios SET password = ? WHERE id = ?', (nueva_hash, session['user_id']))
+        conn.commit()
+        conn.close()
+
+        flash('Contraseña actualizada correctamente.')
+        return redirect(url_for('index'))
+
+    return render_template('cambiar_contrasena.html')
+
+# RUTA: Gestionar usuarios (listar y modificar)
+@app.route('/gestionar_usuarios', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def gestionar_usuarios():
+    conn = obtener_conexion()
+    cursor = conn.cursor()
+
+    if request.method == 'POST':
+        user_id = request.form['user_id']
+        nuevo_username = request.form['username']
+        nuevo_role = request.form['role']
+        nueva_contrasena = request.form.get('nueva_contrasena')
+
+        if not nuevo_username or not nuevo_role:
+            flash('Todos los campos son obligatorios.')
+            return redirect(url_for('gestionar_usuarios'))
+
+        # Actualizar nombre y rol
+        cursor.execute('''
+            UPDATE usuarios SET username = ?, role = ? WHERE id = ?
+        ''', (nuevo_username, nuevo_role, user_id))
+
+        # Actualizar contraseña si se ingresó una nueva
+        if nueva_contrasena:
+            if not es_contrasena_segura(nueva_contrasena):
+                flash('La contraseña no es segura. Debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas, números y símbolos.')
+                return redirect(url_for('gestionar_usuarios'))
+
+            nueva_hash = generate_password_hash(nueva_contrasena)
+            cursor.execute('UPDATE usuarios SET password = ? WHERE id = ?', (nueva_hash, user_id))
+
+        conn.commit()
+        flash('Usuario actualizado correctamente.')
+
+    cursor.execute('SELECT id, username, role FROM usuarios')
+    usuarios = cursor.fetchall()
+    conn.close()
+    return render_template('gestionar_usuarios.html', usuarios=usuarios)
+
+def es_contrasena_segura(password):
+    return (
+        len(password) >= 8 and
+        re.search(r"[A-Z]", password) and
+        re.search(r"[a-z]", password) and
+        re.search(r"[0-9]", password) and
+        re.search(r"[!@#$%^&*(),.?\":{}|<>]", password)
+    )
 
 
 # ===================== Iniciar la aplicación =====================
