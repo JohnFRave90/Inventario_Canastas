@@ -377,24 +377,30 @@ def exportar_canastas_csv():
 @login_required
 def canastas_perdidas():
     conn = obtener_conexion()
-    cursor = conn.cursor()
     query = """
     SELECT 
         c.codigo_barras,
-        MAX(m.fecha) AS fecha_prestamo,
+        m.fecha AS fecha_prestamo,
         v.nombre AS nombre_vendedor
     FROM canastas c
-    JOIN movimientos m ON c.codigo_barras = m.codigo_barras
-    JOIN vendedores v ON m.vendedor_codigo = v.codigo
+    JOIN (
+        SELECT codigo_barras, MAX(fecha) AS fecha
+        FROM movimientos
+        WHERE tipo = 'Sale'
+        GROUP BY codigo_barras
+    ) m ON c.codigo_barras = m.codigo_barras
+    JOIN movimientos mov ON mov.codigo_barras = c.codigo_barras AND mov.fecha = m.fecha
+    JOIN vendedores v ON mov.vendedor_codigo = v.codigo
     WHERE c.actualidad = 'Prestada'
-      AND m.tipo = 'Sale'
-    GROUP BY c.codigo_barras
-    HAVING fecha_prestamo <= DATE('now', '-7 day')
+    AND m.fecha <= datetime('now', '-7 days')
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
+
+    # Calcular días
     df['fecha_prestamo'] = pd.to_datetime(df['fecha_prestamo'])
     df['dias_prestada'] = (datetime.now() - df['fecha_prestamo']).dt.days
+
     return render_template('canastas_perdidas.html', canastas=df.to_dict(orient='records'))
 
 @app.route('/exportar_pdf_canastas_perdidas')
