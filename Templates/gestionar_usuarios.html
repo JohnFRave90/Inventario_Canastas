@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Gestión de Usuarios{% endblock %}
+{% block content %}
+<div class="container mt-4">
+    <h3>Gestión de Usuarios</h3>
+    <table class="table table-bordered">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Usuario</th>
+                <th>Rol</th>
+                <th>Contraseña Nueva</th>
+                <th>Acción</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in usuarios %}
+            <tr>
+                <form method="POST">
+                    <td>{{ user[0] }}</td>
+                    <td>
+                        <input type="hidden" name="user_id" value="{{ user[0] }}">
+                        <input type="text" name="username" value="{{ user[1] }}" class="form-control">
+                    </td>
+                    <td>
+                        <select name="role" class="form-select">
+                            <option value="user" {% if user[2] == 'user' %}selected{% endif %}>Usuario</option>
+                            <option value="admin" {% if user[2] == 'admin' %}selected{% endif %}>Administrador</option>
+                        </select>
+                    </td>
+                    <td>
+                        <input type="password" name="nueva_contrasena" placeholder="Nueva contraseña" class="form-control">
+                    </td>
+                    <td><button type="submit" class="btn btn-sm btn-primary">Guardar</button></td>
+                </form>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block title %}Cambiar Contraseña{% endblock %}
+{% block content %}
+<div class="container mt-5">
+    <div class="mx-auto" style="max-width: 400px;">
+        <h3 class="text-center mb-4">Cambiar Contraseña</h3>
+        <form method="POST">
+            <div class="mb-3">
+                <label for="actual" class="form-label">Contraseña Actual</label>
+                <input type="password" class="form-control" name="actual" required>
+            </div>
+            <div class="mb-3">
+                <label for="nueva" class="form-label">Nueva Contraseña</label>
+                <input type="password" class="form-control" name="nueva" required
+                       pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}"
+                       title="Mínimo 8 caracteres, con mayúscula, minúscula, número y símbolo.">
+            </div>
+            <div class="mb-3">
+                <label for="confirmar" class="form-label">Confirmar Nueva Contraseña</label>
+                <input type="password" class="form-control" name="confirmar" required>
+            </div>
+            <button type="submit" class="btn btn-success w-100">Actualizar Contraseña</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
