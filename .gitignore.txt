@@ -1,1 +1,6 @@
 .class
+__pycache__/
+*.pyc
+instance/
+venv/
+*.log
